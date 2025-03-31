@@ -4,7 +4,7 @@ LABEL authors="Purify my Water team" \
       version="0.0.1"
 
 ## Update dependencies
-#RUN apt-get update && apt-get upgrade -y
+RUN apt-get update && apt-get upgrade -y
 
 # Install pytest
 RUN bash $IDF_PATH/install.sh --enable-pytest
