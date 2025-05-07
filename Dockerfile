@@ -1,7 +1,7 @@
 FROM espressif/idf:release-v5.4
 LABEL authors="Purify my Water team" \
       description="Espressif IDF Docker image with qemu & pytests" \
-      version="0.0.1"
+      version="release-v5.4"
 
 ## Update dependencies
 RUN apt-get update && apt-get upgrade -y
