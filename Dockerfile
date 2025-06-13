@@ -6,6 +6,9 @@ LABEL authors="Purify my Water team" \
 ## Update dependencies
 RUN apt-get update && apt-get upgrade -y
 
+## Install CLion devcontainer dependency
+RUN apt-get install libicu-dev -y
+
 # Install pytest
 RUN bash $IDF_PATH/install.sh --enable-pytest
 
