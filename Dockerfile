@@ -13,5 +13,3 @@ RUN apt-get install libicu-dev -y
 RUN bash $IDF_PATH/install.sh --enable-pytest
 
 ENTRYPOINT ["/opt/esp/entrypoint.sh"]
-
-# TEST CI
