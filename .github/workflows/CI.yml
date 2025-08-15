@@ -136,17 +136,32 @@ jobs:
             -   name: Normalize image name to lowercase
                 run: echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
-            -   name: Print expected tags
+            -   name: Print expected tags and write to summary
                 env:
                     TAGS: ${{ needs.list-tags.outputs.tags }}
                     REGISTRY: ${{ env.REGISTRY }}
                 run: |
                     echo "Dry run: listing expected tags only (no build, no push)."
                     echo "Git tags JSON: $TAGS"
+                    
+                    # Build the list of expected Docker tags
+                    lines=$(echo "$TAGS" | jq -r '.[]' | sed "s#^#${REGISTRY}/${IMAGE_NAME_LC}:#")
+                    
+                    # Print to logs
                     echo "Expected Docker image tags:"
-                    echo "$TAGS" | jq -r '.[]' | while read -r t; do
-                      echo "${REGISTRY}/${IMAGE_NAME_LC}:$t"
-                    done
+                    echo "$lines"
+                    
+                    # Append a nice Markdown section to the Job Summary
+                    {
+                      echo "## Dry run: expected Docker image tags"
+                      echo
+                      echo "- Repository: ${REGISTRY}/${IMAGE_NAME_LC}"
+                      echo "- Tag count: $(echo "$TAGS" | jq 'length')"
+                      echo
+                      echo '```'
+                      echo "$lines"
+                      echo '```'
+                    } >> "$GITHUB_STEP_SUMMARY"
 
     ## -----------------------------------------------------------------
     ## Job 2: Build and publish an image for each tag (skipped on push/Dockerfile CI)
