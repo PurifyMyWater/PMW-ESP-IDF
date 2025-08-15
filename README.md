@@ -1,1 +1,1 @@
-Modified ESP-IDF Docker image that includes the ESP32 emulator & automated test system
+Modified ESP-IDF Docker image that includes the ESP32 emulator & automated test system [![CI/CD](https://github.com/PurifyMyWater/PMW-ESP-IDF/actions/workflows/CI.yml/badge.svg)](https://github.com/PurifyMyWater/PMW-ESP-IDF/actions/workflows/CI.yml)
