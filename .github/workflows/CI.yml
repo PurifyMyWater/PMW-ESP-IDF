@@ -114,6 +114,7 @@ jobs:
                       tags=$(git tag | jq -R -s -c 'split("\n")[:-1]')
                       echo "Detected non-release event, building all tags: $tags"
                       echo "tags=$tags" >> "$GITHUB_OUTPUT"
+                    fi
 
     ## -----------------------------------------------------------------
     ## Job 2: Build and conditionally publish an image for each tag (skipped on push/Dockerfile CI)
