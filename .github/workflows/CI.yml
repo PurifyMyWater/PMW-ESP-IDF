@@ -1,7 +1,10 @@
 name: CI/CD
 
 # This workflow:
-# - Builds and publishes Docker images for every Git tag (weekly/manual) or just the release tag (on release).
+# - Builds and publishes Docker images for every Git tag (scheduled/manual) or just the release tag (on release).
+# - On manual runs, you can choose:
+#     - publish (checkbox): whether to push to GHCR
+#     - dry_run (checkbox): list expected tags only (no build, no push)
 # - Additionally, on any push that changes the Dockerfile, it builds the image for the current commit as a CI check without publishing.
 # - Adds a success gate job that runs after the CI build and returns success if the CI build succeeded.
 
@@ -17,6 +20,11 @@ on:
                 type: boolean
                 required: false
                 default: false
+            dry_run:
+                description: 'Dry run (list expected tags only; no build, no push)'
+                type: boolean
+                required: false
+                default: false
     # Triggers when a new release is published.
     release:
         types: [ published ]
@@ -27,7 +35,7 @@ on:
 
 env:
     REGISTRY: ghcr.io
-    IMAGE_NAME: ${{ github.repository }}
+    IMAGE_NAME: ${{ github.repository }} # may contain uppercase (e.g., PurifyMyWater/PMW-ESP-IDF)
 
 jobs:
     ## -----------------------------------------------------------------
@@ -117,12 +125,37 @@ jobs:
                     fi
 
     ## -----------------------------------------------------------------
-    ## Job 2: Build and conditionally publish an image for each tag (skipped on push/Dockerfile CI)
+    ## Job 1.1: Dry run output — list expected tags only (no build/push)
+    ## - Runs only when manually dispatched with dry_run=true
+    ## -----------------------------------------------------------------
+    dry-run-output:
+        needs: list-tags
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        runs-on: ubuntu-latest
+        steps:
+            -   name: Normalize image name to lowercase
+                run: echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+            -   name: Print expected tags
+                env:
+                    TAGS: ${{ needs.list-tags.outputs.tags }}
+                    REGISTRY: ${{ env.REGISTRY }}
+                run: |
+                    echo "Dry run: listing expected tags only (no build, no push)."
+                    echo "Git tags JSON: $TAGS"
+                    echo "Expected Docker image tags:"
+                    echo "$TAGS" | jq -r '.[]' | while read -r t; do
+                      echo "${REGISTRY}/${IMAGE_NAME_LC}:$t"
+                    done
+
+    ## -----------------------------------------------------------------
+    ## Job 2: Build and publish an image for each tag (skipped on push/Dockerfile CI)
     ## - For schedule and release: always publish.
     ## - For workflow_dispatch: publish only if input checkbox is true.
+    ## - Skipped entirely on dry_run.
     ## -----------------------------------------------------------------
     build-and-publish:
-        if: ${{ github.event_name != 'push' && needs.list-tags.outputs.tags != '[]' }}
+        if: ${{ github.event_name != 'push' && needs.list-tags.outputs.tags != '[]' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         runs-on: ubuntu-latest
         needs: list-tags
         permissions:
@@ -131,7 +164,9 @@ jobs:
             id-token: write     # to sign images with Sigstore
 
         strategy:
+            # This ensures that if one tag fails to build, the others will still be attempted.
             fail-fast: true
+            # Creates a parallel job for each tag in the JSON array from the 'list-tags' job.
             matrix:
                 tag: ${{ fromJson(needs.list-tags.outputs.tags) }}
 
