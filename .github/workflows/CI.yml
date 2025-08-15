@@ -1,4 +1,4 @@
-name: Weekly Tag Publisher
+name: CI/CD
 
 # This workflow:
 # - Builds and publishes Docker images for every Git tag (weekly/manual) or just the release tag (on release).
