@@ -1,20 +1,38 @@
 name: CI/CD
 
+# This workflow:
+# - Builds and publishes Docker images for every Git tag (weekly/manual) or just the release tag (on release).
+# - Additionally, on any push that changes the Dockerfile, it builds the image for the current commit as a CI check without publishing.
+# - Adds a success gate job that runs after the CI build and returns success if the CI build succeeded.
+
 on:
+    # Runs at 02:00 UTC on the 1st day of every month.
     schedule:
         -   cron: '0 2 1 * *'
+    # Allows you to run this workflow manually from the Actions tab on GitHub.
     workflow_dispatch:
+        inputs:
+            publish:
+                description: 'Publish image to GHCR? (Schedule and release always publish)'
+                type: boolean
+                required: false
+                default: false
+    # Triggers when a new release is published.
     release:
         types: [ published ]
+    # CI check: build only when Dockerfile changes on push (no publish).
     push:
         paths:
             - Dockerfile
 
 env:
     REGISTRY: ghcr.io
-    IMAGE_NAME: ${{ github.repository }} # may contain uppercase (e.g., PurifyMyWater/PMW-ESP-IDF)
+    IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+    ## -----------------------------------------------------------------
+    ## Job 0: CI build for the current commit when Dockerfile changes (no publish)
+    ## -----------------------------------------------------------------
     ci-build:
         if: ${{ github.event_name == 'push' }}
         runs-on: ubuntu-latest
@@ -35,13 +53,19 @@ jobs:
                 with:
                     context: .
                     file: ./Dockerfile
-                    push: false
-                    load: false
-                    pull: true
+                    push: false        # do not publish; CI check only
+                    load: false        # do not load into local docker
+                    pull: true         # ensure base images are pulled/validated
+                    # Optional ephemeral tag helpful in logs (not pushed/loaded)
                     tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:ci-${{ github.sha }}
                     cache-from: type=gha
                     cache-to: type=gha,mode=max
 
+    ## -----------------------------------------------------------------
+    ## Job 0.1: CI success gate — runs after ci-build and returns success if ci-build succeeded
+    ## - Runs only on push events (Dockerfile path filter from the trigger)
+    ## - Executes even if ci-build failed, and sets outcome explicitly based on ci-build result
+    ## -----------------------------------------------------------------
     success:
         needs: ci-build
         if: ${{ github.event_name == 'push' && always() }}
@@ -60,10 +84,16 @@ jobs:
                       exit 1
                     fi
 
+    ## -----------------------------------------------------------------
+    ## Job 1: Get tags to build (skipped on push/Dockerfile CI)
+    ## - On scheduled/manual runs: outputs a JSON list of all tags.
+    ## - On release runs: outputs a JSON list with only the release tag.
+    ## -----------------------------------------------------------------
     list-tags:
         if: ${{ github.event_name != 'push' }}
         runs-on: ubuntu-latest
         outputs:
+            # The output is a JSON array string of tag names, e.g., ["v1.0", "v1.1"]
             tags: ${{ steps.get-tags.outputs.tags }}
         steps:
             -   name: Checkout repository
@@ -85,17 +115,22 @@ jobs:
                       echo "Detected non-release event, building all tags: $tags"
                       echo "tags=$tags" >> "$GITHUB_OUTPUT"
 
+    ## -----------------------------------------------------------------
+    ## Job 2: Build and conditionally publish an image for each tag (skipped on push/Dockerfile CI)
+    ## - For schedule and release: always publish.
+    ## - For workflow_dispatch: publish only if input checkbox is true.
+    ## -----------------------------------------------------------------
     build-and-publish:
         if: ${{ github.event_name != 'push' && needs.list-tags.outputs.tags != '[]' }}
         runs-on: ubuntu-latest
         needs: list-tags
         permissions:
-            contents: read
-            packages: write
-            id-token: write
+            contents: read      # to check out private repos
+            packages: write     # to push images to GHCR
+            id-token: write     # to sign images with Sigstore
 
         strategy:
-            fail-fast: false
+            fail-fast: true
             matrix:
                 tag: ${{ fromJson(needs.list-tags.outputs.tags) }}
 
@@ -112,6 +147,7 @@ jobs:
                 run: echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
             -   name: Log into registry ${{ env.REGISTRY }}
+                if: ${{ github.event_name == 'schedule' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
                 uses: docker/login-action@v3
                 with:
                     registry: ${{ env.REGISTRY }}
@@ -125,23 +161,25 @@ jobs:
                     images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
                     tags: type=raw,value=${{ matrix.tag }}
 
-            -   name: Build and push Docker image
+            -   name: Build image (conditionally push)
                 id: build-and-push
                 uses: docker/build-push-action@v6
                 with:
                     context: .
-                    push: true
+                    push: ${{ github.event_name == 'schedule' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
                     tags: ${{ steps.meta.outputs.tags }}
                     labels: ${{ steps.meta.outputs.labels }}
                     cache-from: type=gha
                     cache-to: type=gha,mode=max
 
             -   name: Install cosign
+                if: ${{ github.event_name == 'schedule' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
                 uses: sigstore/cosign-installer@v3
                 with:
                     cosign-release: 'v2.2.4'
 
             -   name: Sign the published Docker image
+                if: ${{ github.event_name == 'schedule' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
                 env:
                     TAGS: ${{ steps.meta.outputs.tags }}
                     DIGEST: ${{ steps.build-and-push.outputs.digest }}
