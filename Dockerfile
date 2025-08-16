@@ -51,6 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libslirp-dev \
         libusb-1.0-0-dev \
         make \
+        cmake \
         libncurses-dev \
         ninja-build \
         libpixman-1-dev \
